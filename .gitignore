@@ -1,0 +1,24 @@
+# 管理ディレクトリ（CLAUDE.md・README.md・SPEC/ 以外を無視）
+TASKS/
+DEBUG/
+CLIENT/
+WORK/
+DELETE/
+ENV/
+test/
+.claude/
+
+# 環境変数
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
