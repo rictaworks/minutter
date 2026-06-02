@@ -1,58 +1,84 @@
 # minutter
 
-## 自動ログイン
+**会議録音 → 議事録・ToDo・要約 自動作成システム（デモ版）**
 
-開発環境では Google ログインをスキップし、自動的に認証済み状態で動作します。
-
-| 環境変数 | 値 | 動作 |
-|---|---|---|
-| `NEXT_PUBLIC_APP_ENV` | `development` | 認証スキップ（開発者用テストユーザーで自動ログイン） |
-| `NEXT_PUBLIC_APP_ENV` | `production` | Google OAuth2 ログインが必要 |
+デスクトップアプリ。オフライン完結・外部 API 不使用・シングルユーザー。
 
 ---
 
-## ページ一覧
+## 起動方法
 
-> 設計書受領後に更新します。
+```bash
+# 前提：Voskモデルを所定の場所に配置済みであること
+# Windows: %APPDATA%\minutter\models\vosk-model-ja\
+# macOS:   ~/Library/Application Support/minutter/models/vosk-model-ja/
+# Linux:   ~/.local/share/minutter/models/vosk-model-ja/
 
-| ページ名 | URL |
-|---|---|
-| （設計書待ち） | - |
+npm install        # フロントエンド依存関係
+cargo tauri dev    # 開発サーバー起動
+```
+
+> Vosk モデルが未配置の場合、アプリ起動時にエラー画面を表示します。自動ダウンロードは行いません。
 
 ---
 
-## API 一覧
+## ページ（画面）一覧
 
-> 設計書受領後に更新します。仕様書は `SPEC/API仕様書.md` を参照。
+| ページ名 | 遷移条件 |
+|---------|---------|
+| [モデルエラー画面](#) | Vosk モデル未配置時に起動直後に表示 |
+| [会議一覧画面](#) | 通常起動後のホーム画面 |
+| [録音・インポート画面](#) | 新規録音開始 or ファイルインポート時 |
+| [文字起こし確認・編集画面](#) | 録音停止 or インポート完了後 |
+| [議事録・ToDo・要約画面](#) | 生成ボタン押下後 |
 
-| タイトル | エンドポイント |
-|---|---|
-| （設計書待ち） | - |
+---
+
+## Tauri コマンド一覧（内部 API）
+
+仕様書: [SPEC/API仕様書.md](SPEC/API仕様書.md)
+
+| タイトル | コマンド |
+|---------|---------|
+| Vosk モデル確認 | `invoke("check_model")` |
+| 録音開始 | `invoke("start_recording")` |
+| 録音停止 | `invoke("stop_recording")` |
+| 音声ファイルインポート | `invoke("import_audio", { path })` |
+| 議事録・ToDo・要約 一括生成 | `invoke("generate_all", { meetingId })` |
+| 会議一覧取得 | `invoke("list_meetings")` |
+| 会議記録削除 | `invoke("delete_meeting", { id })` |
 
 ---
 
 ## 技術スタック
 
 | レイヤー | 技術 |
-|---|---|
-| フロントエンド | Next.js → Vercel |
-| バックエンド | Ruby on Rails → Render / Railway |
-| データベース | PostgreSQL |
-| 補助 API（AI/解析） | FastAPI |
-| 補助 API（リアルタイム） | Gin |
-| 認証 | Google OAuth2 |
+|---------|------|
+| フレームワーク | Tauri v2（Rust + React/TypeScript） |
+| UI | React + Tailwind CSS |
 | アイコン | Font Awesome |
+| 音声キャプチャ | cpal |
+| 音声変換 | ffmpeg-next + Tauri サイドカー |
+| 音声認識 | Vosk-API（日本語モデル・オフライン） |
+| テキスト処理 | ルールベース（Rust） |
+| DB | SQLite（rusqlite） |
+| 配布形式 | .msi / .dmg / .deb |
 
-## ドメイン
+---
 
-- フロントエンド: `minutter.rictaworks.jp`
-- バックエンド API: `api.minutter.rictaworks.jp`
-- 管理画面: `admin.minutter.rictaworks.jp`
+## DB ファイルパス
+
+| OS | パス |
+|----|------|
+| Windows | `%APPDATA%\minutter\data.db` |
+| macOS | `~/Library/Application Support/minutter/data.db` |
+| Linux | `~/.local/share/minutter/data.db` |
+
+---
 
 ## 開発者向けドキュメント
 
 - [開発環境](ENV/DEVELOPMENT.md)
-- [本番環境](ENV/PRODUCTION.md)
 - [仕様書](SPEC/)
 - [タスク](TASKS/)
 - [バグ報告](DEBUG/)
