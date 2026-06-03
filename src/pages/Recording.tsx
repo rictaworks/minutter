@@ -21,6 +21,7 @@ export function Recording({ meetingId, onComplete, onBack }: RecordingProps) {
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const [devicesError, setDevicesError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
   // ファイルインポート
@@ -58,7 +59,9 @@ export function Recording({ meetingId, onComplete, onBack }: RecordingProps) {
 
   const handleStopRecording = useCallback(async () => {
     setRecordError(null);
+    setIsStopping(true);
     const result = await stopRecording(meetingId);
+    setIsStopping(false);
     if (result.error !== null) {
       setRecordError(result.error);
       setIsRecording(false);
@@ -199,7 +202,7 @@ export function Recording({ meetingId, onComplete, onBack }: RecordingProps) {
           )}
 
           {/* 録音中アニメーション */}
-          {isRecording && (
+          {isRecording && !isStopping && (
             <div
               className="flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-lg"
               role="status"
@@ -207,6 +210,18 @@ export function Recording({ meetingId, onComplete, onBack }: RecordingProps) {
             >
               <span className="inline-block w-3 h-3 bg-red-500 rounded-full animate-pulse" aria-hidden="true" />
               <span className="text-sm font-medium text-red-700">{JA.recording.recording}</span>
+            </div>
+          )}
+
+          {/* 停止・文字起こし処理中 */}
+          {isStopping && (
+            <div
+              className="flex items-center gap-3 px-4 py-3 bg-yellow-50 border border-yellow-200 rounded-lg"
+              role="status"
+              aria-live="polite"
+            >
+              <i className="fa-solid fa-spinner animate-spin text-yellow-600" aria-hidden="true" />
+              <span className="text-sm font-medium text-yellow-700">音声を処理中です。しばらくお待ちください...</span>
             </div>
           )}
 
@@ -232,11 +247,12 @@ export function Recording({ meetingId, onComplete, onBack }: RecordingProps) {
               <button
                 type="button"
                 onClick={() => void handleStopRecording()}
+                disabled={isStopping}
                 aria-label={JA.recording.stopButton}
-                className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <i className="fa-solid fa-stop" aria-hidden="true" />
-                {JA.recording.stopButton}
+                {isStopping ? "処理中..." : JA.recording.stopButton}
               </button>
             )}
             <button
