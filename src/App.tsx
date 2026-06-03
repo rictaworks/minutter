@@ -35,7 +35,7 @@ function pageTitleOf(page: Page): string {
 }
 
 export function App() {
-  const { checkModel, initApp, createMeeting } = useTauri();
+  const { checkModel, initApp, createMeeting, getMeeting } = useTauri();
   const [page, setPage] = useState<Page>({ name: "loading" });
   const [initError, setInitError] = useState<string | null>(null);
 
@@ -85,9 +85,15 @@ export function App() {
     setPage({ name: "recording", meetingId: result.data });
   }, [createMeeting]);
 
-  const handleOpenMeeting = useCallback((meetingId: string) => {
-    setPage({ name: "result", meetingId });
-  }, []);
+  const handleOpenMeeting = useCallback(async (meetingId: string) => {
+    const result = await getMeeting(meetingId);
+    const status = result.data?.meeting.status ?? "done";
+    if (status === "recording") {
+      setPage({ name: "recording", meetingId });
+    } else {
+      setPage({ name: "result", meetingId });
+    }
+  }, [getMeeting]);
 
   const handleRecordingComplete = useCallback(
     (meetingId: string, rawText: string) => {
@@ -140,7 +146,7 @@ export function App() {
       {page.name === "meeting_list" && (
         <MeetingList
           onNewRecording={() => void handleNewRecording()}
-          onOpenMeeting={handleOpenMeeting}
+          onOpenMeeting={(id) => void handleOpenMeeting(id)}
         />
       )}
 
