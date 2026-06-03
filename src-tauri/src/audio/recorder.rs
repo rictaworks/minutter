@@ -99,10 +99,11 @@ impl AudioRecorder {
         let state = Arc::clone(&self.state);
         let max_bytes = self.max_bytes;
 
+        // f32 でキャプチャして i16 に変換（WASAPI は共有モードで f32 のみ対応が多い）
         let stream = device
             .build_input_stream(
                 &config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     let mut st = match state.lock() {
                         Ok(s) => s,
                         Err(e) => {
@@ -119,7 +120,11 @@ impl AudioRecorder {
                         st.overflow = true;
                         return;
                     }
-                    st.samples.extend_from_slice(data);
+                    // f32 [-1.0, 1.0] → i16 [-32768, 32767]
+                    for &s in data {
+                        let clamped = s.max(-1.0).min(1.0);
+                        st.samples.push((clamped * 32767.0) as i16);
+                    }
                     st.bytes_written += byte_size;
                 },
                 move |err| {
