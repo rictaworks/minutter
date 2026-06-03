@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use log::{debug, error, info};
 use std::fs::File;
 use std::io::BufWriter;
@@ -39,6 +39,8 @@ pub struct AudioRecorder {
     stream: Option<Stream>,
     /// 録音時のチャンネル数（デバイス依存）
     record_channels: u16,
+    /// 録音時のサンプルレート（デバイス依存）
+    native_sample_rate: u32,
 }
 
 // cpal::Stream (WASAPI) は Send を実装しないが、stream の操作は
@@ -57,6 +59,7 @@ impl AudioRecorder {
             state: Arc::new(Mutex::new(RecordingState::new())),
             stream: None,
             record_channels: 1,
+            native_sample_rate: config::RECORDING_SAMPLE_RATE,
         }
     }
 
@@ -92,50 +95,84 @@ impl AudioRecorder {
         let host = cpal::default_host();
         let device = self.select_input_device(&host)?;
 
-        let (config, channels) = self.build_stream_config(&device)?;
+        let supported = device
+            .default_input_config()
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let sample_format = supported.sample_format();
+        let channels = supported.channels();
+        let sample_rate = supported.sample_rate();
+
         self.record_channels = channels;
-        debug!("ストリーム設定: {:?} channels={}", config, channels);
+        self.native_sample_rate = sample_rate.0;
+
+        let config = StreamConfig {
+            channels,
+            sample_rate,
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        info!("デバイス設定: rate={} channels={} format={:?}", sample_rate.0, channels, sample_format);
 
         let state = Arc::clone(&self.state);
         let max_bytes = self.max_bytes;
 
-        // f32 でキャプチャして i16 に変換（WASAPI は共有モードで f32 のみ対応が多い）
-        let stream = device
-            .build_input_stream(
-                &config,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mut st = match state.lock() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("録音状態ロック失敗: {}", e);
-                            return;
-                        }
-                    };
-                    if st.overflow {
-                        return;
-                    }
-                    let byte_size = (data.len() * 2) as u64;
-                    if st.bytes_written + byte_size > max_bytes {
-                        error!("録音ファイルサイズ上限超過: {} bytes", max_bytes);
-                        st.overflow = true;
-                        return;
-                    }
-                    // f32 [-1.0, 1.0] → i16 [-32768, 32767]
-                    for &s in data {
-                        let clamped = s.max(-1.0).min(1.0);
-                        st.samples.push((clamped * 32767.0) as i16);
-                    }
-                    st.bytes_written += byte_size;
-                },
-                move |err| {
-                    error!("録音ストリームエラー: {}", err);
-                },
-                None,
-            )
-            .map_err(|e| {
-                error!("ストリーム構築失敗: {}", e);
-                AppError::Internal(e.to_string())
-            })?;
+        // デバイスのネイティブフォーマットで録音し i16 に変換
+        let err_fn = move |err| {
+            error!("録音ストリームエラー: {}", err);
+        };
+
+        let stream = match sample_format {
+            SampleFormat::F32 => {
+                let st = Arc::clone(&state);
+                device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        push_samples_f32(&st, data, max_bytes);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            SampleFormat::I16 => {
+                let st = Arc::clone(&state);
+                device.build_input_stream(
+                    &config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        push_samples_i16(&st, data, max_bytes);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            SampleFormat::U16 => {
+                let st = Arc::clone(&state);
+                device.build_input_stream(
+                    &config,
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        push_samples_u16(&st, data, max_bytes);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            _ => {
+                // F64 など: f32 にキャストして試みる
+                let st = Arc::clone(&state);
+                device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        push_samples_f32(&st, data, max_bytes);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+        }
+        .map_err(|e| {
+            error!("ストリーム構築失敗: {}", e);
+            AppError::Internal(e.to_string())
+        })?;
 
         stream.play().map_err(|e| {
             error!("ストリーム再生開始失敗: {}", e);
@@ -177,7 +214,7 @@ impl AudioRecorder {
         };
         debug!("サンプル数: {} ({}ch -> mono)", samples.len(), self.record_channels);
 
-        self.write_wav(&samples)?;
+        self.write_wav(&samples, self.native_sample_rate)?;
 
         info!("録音停止完了: {:?}", self.output_path);
         Ok(self.output_path.clone())
@@ -213,34 +250,10 @@ impl AudioRecorder {
         }
     }
 
-    /// ストリーム設定を構築する
-    fn build_stream_config(&self, device: &Device) -> Result<(StreamConfig, u16), AppError> {
-        let supported = device
-            .default_input_config()
-            .map_err(|e| AppError::Internal(e.to_string()))?;
-
-        debug!("デフォルト設定: {:?}", supported);
-
-        // Vosk 推奨: 16kHz
-        let sample_rate = if supported.sample_rate().0 >= config::RECORDING_SAMPLE_RATE {
-            cpal::SampleRate(config::RECORDING_SAMPLE_RATE)
-        } else {
-            supported.sample_rate()
-        };
-
-        // チャンネル数はデバイスのデフォルトに従う（WASAPIはモノラル非対応が多い）
-        let channels = supported.channels();
-
-        Ok((StreamConfig {
-            channels,
-            sample_rate,
-            buffer_size: cpal::BufferSize::Default,
-        }, channels))
-    }
 
     /// PCM サンプルを WAV ファイルに書き込む
-    fn write_wav(&self, samples: &[i16]) -> Result<(), AppError> {
-        debug!("WAV 書き込み開始: {:?}", self.output_path);
+    fn write_wav(&self, samples: &[i16], sample_rate: u32) -> Result<(), AppError> {
+        debug!("WAV 書き込み開始: {:?} sample_rate={}", self.output_path, sample_rate);
 
         let file = File::create(&self.output_path).map_err(|e| {
             error!("WAV ファイル作成失敗: {}", e);
@@ -250,7 +263,6 @@ impl AudioRecorder {
 
         let num_samples = samples.len() as u32;
         let num_channels = config::RECORDING_CHANNELS as u32;
-        let sample_rate = config::RECORDING_SAMPLE_RATE;
         let bits_per_sample = config::WAV_BITS_PER_SAMPLE as u32;
         let byte_rate = sample_rate * num_channels * (bits_per_sample / 8);
         let block_align = num_channels * (bits_per_sample / 8);
@@ -281,6 +293,62 @@ impl AudioRecorder {
         debug!("WAV 書き込み完了: {} サンプル", num_samples);
         Ok(())
     }
+}
+
+/// f32 サンプルを RecordingState に追加する
+fn push_samples_f32(state: &Arc<Mutex<RecordingState>>, data: &[f32], max_bytes: u64) {
+    let mut st = match state.lock() {
+        Ok(s) => s,
+        Err(e) => { error!("録音状態ロック失敗: {}", e); return; }
+    };
+    if st.overflow { return; }
+    let byte_size = (data.len() * 2) as u64;
+    if st.bytes_written + byte_size > max_bytes {
+        error!("録音ファイルサイズ上限超過");
+        st.overflow = true;
+        return;
+    }
+    for &s in data {
+        let clamped = s.max(-1.0).min(1.0);
+        st.samples.push((clamped * 32767.0) as i16);
+    }
+    st.bytes_written += byte_size;
+}
+
+/// i16 サンプルを RecordingState に追加する
+fn push_samples_i16(state: &Arc<Mutex<RecordingState>>, data: &[i16], max_bytes: u64) {
+    let mut st = match state.lock() {
+        Ok(s) => s,
+        Err(e) => { error!("録音状態ロック失敗: {}", e); return; }
+    };
+    if st.overflow { return; }
+    let byte_size = (data.len() * 2) as u64;
+    if st.bytes_written + byte_size > max_bytes {
+        error!("録音ファイルサイズ上限超過");
+        st.overflow = true;
+        return;
+    }
+    st.samples.extend_from_slice(data);
+    st.bytes_written += byte_size;
+}
+
+/// u16 サンプルを RecordingState に追加する（符号なし → 符号あり変換）
+fn push_samples_u16(state: &Arc<Mutex<RecordingState>>, data: &[u16], max_bytes: u64) {
+    let mut st = match state.lock() {
+        Ok(s) => s,
+        Err(e) => { error!("録音状態ロック失敗: {}", e); return; }
+    };
+    if st.overflow { return; }
+    let byte_size = (data.len() * 2) as u64;
+    if st.bytes_written + byte_size > max_bytes {
+        error!("録音ファイルサイズ上限超過");
+        st.overflow = true;
+        return;
+    }
+    for &s in data {
+        st.samples.push((s as i32 - 32768) as i16);
+    }
+    st.bytes_written += byte_size;
 }
 
 /// WAV ヘッダを書き込む

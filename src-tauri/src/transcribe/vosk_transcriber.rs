@@ -35,6 +35,11 @@ impl VoskTranscriber {
             AppError::Internal("モデルパスの文字列変換失敗".to_string())
         })?;
 
+        // Windows の長パスプレフィックス \\?\ を除去（Vosk C ライブラリが解釈できないため）
+        let model_path_str = model_path_str
+            .strip_prefix("\\\\?\\")
+            .unwrap_or(model_path_str);
+
         let model = vosk::Model::new(model_path_str).ok_or_else(|| {
             error!("Vosk モデル読み込み失敗: {}", model_path_str);
             AppError::ModelNotFound(model_path_str.to_string())

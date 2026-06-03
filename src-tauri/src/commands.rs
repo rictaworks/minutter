@@ -180,6 +180,16 @@ pub fn stop_recording(
             .map_err(|e| e.to_string())?;
     }
 
+    // FFmpegで16kHz/モノラルに変換（WASAPIはネイティブレートで録音するため）
+    let wav_path = {
+        let ffmpeg_path = get_ffmpeg_path(&app)?;
+        let importer = AudioImporter::new(ffmpeg_path);
+        importer.convert_to_wav(wav_path).map_err(|e| {
+            error!("録音ファイルのWAV変換失敗: {}", e);
+            e.to_string()
+        })?
+    };
+
     // 文字起こし
     let raw_text = transcribe_file(&app, &wav_path)?;
 
@@ -507,9 +517,17 @@ fn get_ffmpeg_path(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .resource_dir()
         .map_err(|e| e.to_string())?;
-    Ok(resource_path
+    let sidecar_path = resource_path
         .join("binaries")
-        .join(config::FFMPEG_SIDECAR_NAME))
+        .join(config::FFMPEG_SIDECAR_NAME);
+
+    if sidecar_path.exists() {
+        Ok(sidecar_path)
+    } else {
+        // 開発環境: PATH 上の ffmpeg にフォールバック
+        debug!("サイドカー ffmpeg が見つかりません。PATH の ffmpeg を使用: {:?}", sidecar_path);
+        Ok(PathBuf::from("ffmpeg"))
+    }
 }
 
 /// WAV ファイルを文字起こしする
