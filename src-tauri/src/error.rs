@@ -4,31 +4,31 @@ use crate::config;
 /// アプリケーション共通エラー型
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("{}: {0}", config::ERR_MODEL_NOT_FOUND)]
+    #[error("{prefix}: {0}", prefix = config::ERR_MODEL_NOT_FOUND)]
     ModelNotFound(String),
 
-    #[error("{}: {0}", config::ERR_DB_CORRUPTED)]
+    #[error("{prefix}: {0}", prefix = config::ERR_DB_CORRUPTED)]
     DbCorrupted(String),
 
-    #[error("{}: {0}", config::ERR_DB_INIT_FAILED)]
+    #[error("{prefix}: {0}", prefix = config::ERR_DB_INIT_FAILED)]
     DbInitFailed(String),
 
-    #[error("{}: {0}", config::ERR_AUDIO_TOO_LARGE)]
+    #[error("{prefix}: {0}", prefix = config::ERR_AUDIO_TOO_LARGE)]
     AudioTooLarge(u64),
 
-    #[error("{}: {0}", config::ERR_UNSUPPORTED_FORMAT)]
+    #[error("{prefix}: {0}", prefix = config::ERR_UNSUPPORTED_FORMAT)]
     UnsupportedFormat(String),
 
-    #[error("{}: {0}", config::ERR_RECORDING_IN_PROGRESS)]
+    #[error("{prefix}: {0}", prefix = config::ERR_RECORDING_IN_PROGRESS)]
     RecordingInProgress(String),
 
-    #[error("{}: {0}", config::ERR_NO_RECORDING)]
+    #[error("{prefix}: {0}", prefix = config::ERR_NO_RECORDING)]
     NoRecording(String),
 
-    #[error("{}: {0}", config::ERR_FFMPEG_FAILED)]
+    #[error("{prefix}: {0}", prefix = config::ERR_FFMPEG_FAILED)]
     FfmpegFailed(String),
 
-    #[error("{}: {0}", config::ERR_TRANSCRIBE_FAILED)]
+    #[error("{prefix}: {0}", prefix = config::ERR_TRANSCRIBE_FAILED)]
     TranscribeFailed(String),
 
     #[error("IO エラー: {0}")]
