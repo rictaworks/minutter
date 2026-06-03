@@ -37,6 +37,8 @@ pub struct AudioRecorder {
     max_bytes: u64,
     state: Arc<Mutex<RecordingState>>,
     stream: Option<Stream>,
+    /// 録音時のチャンネル数（デバイス依存）
+    record_channels: u16,
 }
 
 // cpal::Stream (WASAPI) は Send を実装しないが、stream の操作は
@@ -54,6 +56,7 @@ impl AudioRecorder {
             max_bytes: config::MAX_AUDIO_BYTES,
             state: Arc::new(Mutex::new(RecordingState::new())),
             stream: None,
+            record_channels: 1,
         }
     }
 
@@ -89,8 +92,9 @@ impl AudioRecorder {
         let host = cpal::default_host();
         let device = self.select_input_device(&host)?;
 
-        let config = self.build_stream_config(&device)?;
-        debug!("ストリーム設定: {:?}", config);
+        let (config, channels) = self.build_stream_config(&device)?;
+        self.record_channels = channels;
+        debug!("ストリーム設定: {:?} channels={}", config, channels);
 
         let state = Arc::clone(&self.state);
         let max_bytes = self.max_bytes;
@@ -154,10 +158,21 @@ impl AudioRecorder {
             return Err(AppError::AudioTooLarge(state.bytes_written));
         }
 
-        let samples = &state.samples;
-        debug!("サンプル数: {}", samples.len());
+        let samples = if self.record_channels > 1 {
+            // ステレオ等をモノラルにミックスダウン
+            let ch = self.record_channels as usize;
+            state.samples.chunks(ch)
+                .map(|frame| {
+                    let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+                    (sum / ch as i32) as i16
+                })
+                .collect::<Vec<i16>>()
+        } else {
+            state.samples.clone()
+        };
+        debug!("サンプル数: {} ({}ch -> mono)", samples.len(), self.record_channels);
 
-        self.write_wav(samples)?;
+        self.write_wav(&samples)?;
 
         info!("録音停止完了: {:?}", self.output_path);
         Ok(self.output_path.clone())
@@ -193,27 +208,29 @@ impl AudioRecorder {
         }
     }
 
-    /// ストリーム設定を構築する（16kHz モノラル i16 固定）
-    fn build_stream_config(&self, device: &Device) -> Result<StreamConfig, AppError> {
+    /// ストリーム設定を構築する
+    fn build_stream_config(&self, device: &Device) -> Result<(StreamConfig, u16), AppError> {
         let supported = device
             .default_input_config()
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         debug!("デフォルト設定: {:?}", supported);
 
-        // Vosk 推奨: 16kHz モノラル
-        // cpal が 16kHz をサポートしていない場合はデフォルトレートを使用
+        // Vosk 推奨: 16kHz
         let sample_rate = if supported.sample_rate().0 >= config::RECORDING_SAMPLE_RATE {
             cpal::SampleRate(config::RECORDING_SAMPLE_RATE)
         } else {
             supported.sample_rate()
         };
 
-        Ok(StreamConfig {
-            channels: config::RECORDING_CHANNELS,
+        // チャンネル数はデバイスのデフォルトに従う（WASAPIはモノラル非対応が多い）
+        let channels = supported.channels();
+
+        Ok((StreamConfig {
+            channels,
             sample_rate,
             buffer_size: cpal::BufferSize::Default,
-        })
+        }, channels))
     }
 
     /// PCM サンプルを WAV ファイルに書き込む
