@@ -39,6 +39,11 @@ pub struct AudioRecorder {
     stream: Option<Stream>,
 }
 
+// cpal::Stream (WASAPI) は Send を実装しないが、stream の操作は
+// Mutex でガードされた単一コンテキストからのみ行われるため安全
+// SAFETY: stream の生成・停止は常に同一スレッドから行われる
+unsafe impl Send for AudioRecorder {}
+
 impl AudioRecorder {
     /// 新しい AudioRecorder を作成する
     pub fn new(output_path: PathBuf) -> Self {
