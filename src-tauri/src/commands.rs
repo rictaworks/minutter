@@ -517,9 +517,14 @@ fn get_ffmpeg_path(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .resource_dir()
         .map_err(|e| e.to_string())?;
+    let exe_name = if cfg!(windows) {
+        format!("{}.exe", config::FFMPEG_SIDECAR_NAME)
+    } else {
+        config::FFMPEG_SIDECAR_NAME.to_string()
+    };
     let sidecar_path = resource_path
         .join("binaries")
-        .join(config::FFMPEG_SIDECAR_NAME);
+        .join(&exe_name);
 
     if sidecar_path.exists() {
         Ok(sidecar_path)

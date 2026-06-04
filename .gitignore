@@ -27,6 +27,10 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/libs/
 
+# バンドルリソース（サイズが大きいため Git 管理外）
+src-tauri/models/
+src-tauri/binaries/
+
 # OS
 .DS_Store
 Thumbs.db
