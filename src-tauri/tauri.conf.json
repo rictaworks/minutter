@@ -36,6 +36,11 @@
     "resources": {
       "models/vosk-model-ja/**/*": "models/vosk-model-ja",
       "binaries/ffmpeg.exe": "binaries/ffmpeg.exe"
+    },
+    "windows": {
+      "dll_files": [
+        "libs/libvosk.dll"
+      ]
     }
   }
 }
