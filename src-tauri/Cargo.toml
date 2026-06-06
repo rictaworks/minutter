@@ -1,6 +1,6 @@
 [package]
 name = "minutter"
-version = "0.1.1"
+version = "0.1.2"
 description = "会議録音 → 議事録・ToDo・要約 自動作成システム（デモ版）"
 authors = []
 edition = "2021"
