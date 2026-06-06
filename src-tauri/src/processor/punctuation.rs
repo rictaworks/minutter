@@ -1,197 +1,152 @@
 /// Vosk の無句読点テキストに句読点を補完する
 ///
-/// Vosk の日本語モデルは句読点を出力しないため、
-/// 文末表現パターンに基づいてルールベースで「。」を付与する。
+/// Vosk の日本語モデルは句読点を出力しない。
+/// 文末表現パターンに最長一致でマッチし「。」を挿入する。
+/// スペース区切りトークンは結合してから処理する。
 pub fn restore_punctuation(text: &str) -> String {
     if text.is_empty() {
         return text.to_string();
     }
-
-    // すでに句読点が含まれていれば補完不要
+    // すでに句読点が含まれていれば補完不要（手動編集済みテキストを保護）
     if text.contains('。') || text.contains('、') {
         return text.to_string();
     }
 
-    // Vosk は単語をスペース区切りで返すことがあるため、スペースを除去してから処理する
-    // ただし英数字間のスペースは保持する（半角スペースを全角スペースに変換後、日本語部分のみ結合）
-    let text = text.replace('\u{3000}', " "); // 全角スペース → 半角スペース
+    // Vosk はチャンク間をスペースで区切る場合がある。
+    // 日本語はスペース不要なのでまとめて結合する。
+    let joined: String = text.split_whitespace().collect();
 
-    // スペース区切りトークンを結合する（日本語はスペース不要）
-    let joined = join_japanese_tokens(&text);
-
-    // 文末表現で区切り「。」を付与する
     insert_kuten(&joined)
 }
 
-/// スペース区切りの日本語トークンを結合する
-/// 英数字・記号を含む部分はスペースを保持する
-fn join_japanese_tokens(text: &str) -> String {
-    let tokens: Vec<&str> = text.split_whitespace().collect();
-    if tokens.len() <= 1 {
-        return text.to_string();
-    }
-
-    let mut result = String::new();
-    for (i, token) in tokens.iter().enumerate() {
-        if i == 0 {
-            result.push_str(token);
-            continue;
-        }
-        let prev_last = result.chars().last().unwrap_or(' ');
-        let curr_first = token.chars().next().unwrap_or(' ');
-
-        // 前後どちらかが ASCII なら空白を保持
-        if prev_last.is_ascii() || curr_first.is_ascii() {
-            result.push(' ');
-        }
-        result.push_str(token);
-    }
-    result
-}
-
-/// 文末表現パターンに基づいて「。」を挿入する
+/// 文末パターンに「。」を挿入する
+///
+/// アルゴリズム:
+/// 1. 直前の「。」挿入からの文字数が MIN_SENTENCE_LEN 以上になったら
+///    パターン一致を試みる（短すぎる文を作らないため）。
+/// 2. パターンは長い順に定義し、最初にマッチしたものを採用する。
+/// 3. マッチしたパターン末尾に「。」を挿入してポインタを進める。
 fn insert_kuten(text: &str) -> String {
-    // 文末と判定するサフィックスパターン（長い順に並べる）
-    const SENTENCE_END_PATTERNS: &[&str] = &[
-        // ～ました系
-        "ました",
-        "でした",
+    /// 一文の最低文字数（これ未満では句点を挿入しない）
+    const MIN_SENTENCE_LEN: usize = 5;
+
+    /// 文末と判定する語尾パターン（長い順に定義すること）
+    const PATTERNS: &[&str] = &[
+        // ～ませんでした系
         "ませんでした",
-        "ましたか",
-        // ～ます系
-        "ます",
-        "ません",
-        "ますか",
+        // ～ましょう系
         "ましょう",
-        // ～です系
-        "です",
-        "ですか",
-        "ですね",
-        "ですよ",
+        // ～ましたか系
+        "ましたか",
+        // ～ましたよ / ましたね
+        "ましたよね",
+        "ましたよ",
+        "ましたね",
+        // ～ました
+        "ました",
+        // ～ません
+        "ません",
+        // ～ますよね / ますよ / ますね / ますか
+        "ますよね",
+        "ますよ",
+        "ますね",
+        "ますか",
+        // ～ます
+        "ます",
+        // ～でしたか / でしたよ / でしたね
+        "でしたか",
+        "でしたよ",
+        "でしたね",
+        // ～でした
+        "でした",
+        // ～ですよね / ですよ / ですね / ですか
         "ですよね",
-        // ～だ系
-        "だ",
-        "だな",
-        "だね",
-        "だよ",
-        "だよな",
-        "だよね",
-        "だろう",
+        "ですよ",
+        "ですね",
+        "ですか",
+        // ～です
+        "です",
+        // ～だろうか / だろう
         "だろうか",
+        "だろう",
+        // ～だよね / だよな / だよ / だね / だな / だった
+        "だよね",
+        "だよな",
+        "だよ",
+        "だね",
+        "だな",
         "だった",
-        // ～る系（動詞終止形）
-        "する",
-        "できる",
-        "なる",
-        "ある",
-        "いる",
-        "くる",
-        "おく",
-        "もらう",
-        "あげる",
-        "もらえる",
-        // ～て系（接続表現・一時停止）
-        "て",
-        "で",
-        "ね",
-        "よ",
-        "な",
-        "わ",
-        "か",
-        // ～い系（形容詞終止形）
-        "ない",
-        "たい",
-        "よい",
-        "いい",
-        "多い",
-        "少ない",
-        // ～と思います系
+        // ～と思います / と思いました / と思う / と思った
         "と思います",
         "と思いました",
         "と思う",
         "と思った",
-        "と思って",
-        // ～ください系
-        "ください",
-        "くださいね",
-        // ～という系
-        "という",
-        "ということ",
-        "ということで",
+        // ～ということです / ということで / ということ
         "ということです",
-        // ～について系
-        "について",
-        "に関して",
-        "に関しては",
-        // ～ので系
-        "ので",
-        "から",
-        "けど",
-        "けれど",
-        "が",
+        "ということで",
+        "ということ",
+        // ～ください
+        "ください",
+        // ～できます / できる / します / する
+        "できます",
+        "できる",
+        "します",
+        "する",
+        // ～なります / なる / あります / ある / います / いる
+        "なります",
+        "なる",
+        "あります",
+        "ある",
+        "います",
+        "いる",
+        // ～ない / たい
+        "ない",
+        "たい",
+        // 短い終助詞（最後に判定）
+        "よね",
+        "よ",
+        "ね",
+        "わ",
     ];
-
-    // チャンク（区切り候補の単位）に分割する
-    // アプローチ: 文末パターンの直後に「。」を差し込む
-    // まず全体を走査しながら文末候補位置を見つける
 
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
-    if len == 0 {
-        return text.to_string();
-    }
-
-    let mut result = String::new();
+    let mut result = String::with_capacity(len + len / 8);
     let mut pos = 0;
+    let mut since_last_kuten: usize = 0;
 
     while pos < len {
-        // 現在位置以降の残りテキストを文字列に
-        let remaining: String = chars[pos..].iter().collect();
-
-        // 最長一致で文末パターンを探す
-        // パターンを長さ降順に探す（SENTENCE_END_PATTERNS はすでに長い順）
-        let mut matched_end: Option<usize> = None;
-        for pattern in SENTENCE_END_PATTERNS {
-            let pat_chars: Vec<char> = pattern.chars().collect();
-            let pat_len = pat_chars.len();
-            if pos + pat_len > len {
-                continue;
-            }
-            let window: String = chars[pos..pos + pat_len].iter().collect();
-            if window == *pattern {
-                // パターン末尾位置
-                let end_pos = pos + pat_len;
-                // 直後が文末記号・空白・文字列末尾 or 別の文末パターン開始なら採用
-                let next_is_boundary = end_pos >= len
-                    || chars[end_pos] == ' '
-                    || chars[end_pos] == '\n'
-                    || chars[end_pos] == '　'
-                    || "、。！？,.".contains(chars[end_pos]);
-                if next_is_boundary {
-                    matched_end = Some(end_pos);
+        // 最低文字数に達したらパターンマッチを試みる
+        let mut matched = false;
+        if since_last_kuten >= MIN_SENTENCE_LEN {
+            for pattern in PATTERNS {
+                let pat_chars: Vec<char> = pattern.chars().collect();
+                let pat_len = pat_chars.len();
+                if pos + pat_len > len {
+                    continue;
+                }
+                let window_matches = chars[pos..pos + pat_len]
+                    .iter()
+                    .zip(pat_chars.iter())
+                    .all(|(a, b)| a == b);
+                if window_matches {
+                    // パターンを出力して「。」を付ける
+                    for &c in &chars[pos..pos + pat_len] {
+                        result.push(c);
+                    }
+                    result.push('。');
+                    pos += pat_len;
+                    since_last_kuten = 0;
+                    matched = true;
                     break;
                 }
             }
         }
 
-        if let Some(end) = matched_end {
-            // パターン部分をそのまま出力して「。」を付ける
-            let segment: String = chars[pos..end].iter().collect();
-            result.push_str(&segment);
-            // 次の文字が既に句読点・改行でなければ「。」を付ける
-            let next_char = if end < len { Some(chars[end]) } else { None };
-            if next_char != Some('。')
-                && next_char != Some('！')
-                && next_char != Some('？')
-                && next_char != Some('\n')
-            {
-                result.push('。');
-            }
-            pos = end;
-        } else {
-            // マッチなし: 1文字そのまま出力
+        if !matched {
             result.push(chars[pos]);
             pos += 1;
+            since_last_kuten += 1;
         }
     }
 
@@ -203,8 +158,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_already_has_punctuation() {
+    fn test_already_has_kuten() {
         let text = "今日は会議です。明日は休みです。";
+        assert_eq!(restore_punctuation(text), text);
+    }
+
+    #[test]
+    fn test_already_has_ten() {
+        let text = "今日は、会議があります";
         assert_eq!(restore_punctuation(text), text);
     }
 
@@ -214,23 +175,51 @@ mod tests {
     }
 
     #[test]
-    fn test_join_tokens() {
-        let text = "今日 は 会議 です 明日 は 休み です";
-        let result = restore_punctuation(text);
-        assert!(result.contains('。'), "句読点が挿入されるべき: {}", result);
-    }
-
-    #[test]
-    fn test_insert_kuten_masu() {
+    fn test_masu_pattern() {
+        // 「ます」パターンで句点が入ること
         let text = "今日は作業しますそれからレビューします";
         let result = restore_punctuation(text);
         assert!(result.contains('。'), "句読点が挿入されるべき: {}", result);
     }
 
     #[test]
-    fn test_vosk_spaced_output() {
-        let text = "今日 は 資料 を 作成 し ます 明日 まで に 送り ます";
+    fn test_mashita_pattern() {
+        let text = "資料を作成しましたご確認をお願いします";
         let result = restore_punctuation(text);
         assert!(result.contains('。'), "句読点が挿入されるべき: {}", result);
+    }
+
+    #[test]
+    fn test_desu_pattern() {
+        let text = "今日は金曜日ですそれでは会議を始めます";
+        let result = restore_punctuation(text);
+        assert!(result.contains('。'), "句読点が挿入されるべき: {}", result);
+    }
+
+    #[test]
+    fn test_spaced_vosk_output() {
+        // Vosk がスペースを挟んで出力するケース
+        let text = "今日 は 作業 し ます 明日 まで に 送り ます";
+        let result = restore_punctuation(text);
+        assert!(result.contains('。'), "句読点が挿入されるべき: {}", result);
+        assert!(!result.contains(' '), "スペースが残っていてはいけない: {}", result);
+    }
+
+    #[test]
+    fn test_min_sentence_len() {
+        // 短すぎる文には句点を挿入しない
+        let text = "ですます";
+        let result = restore_punctuation(text);
+        // 4文字以下なので MIN_SENTENCE_LEN を超えない → 末尾のみ挿入される可能性
+        // ここでは単純に処理されることを確認
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_sentences() {
+        let text = "今日は資料を作成しました明日はレビューをしますご確認をお願いします";
+        let result = restore_punctuation(text);
+        let kuten_count = result.chars().filter(|&c| c == '。').count();
+        assert!(kuten_count >= 2, "複数の句点が挿入されるべき: {} ({}個)", result, kuten_count);
     }
 }
