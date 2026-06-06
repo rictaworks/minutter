@@ -8,7 +8,7 @@ use crate::audio::{AudioImporter, AudioRecorder};
 use crate::config;
 use crate::db::models::{MinuteItem, NewMeeting, NewMinute, NewSummary, NewTodo, NewTranscript, TodoItem};
 use crate::db::MeetingRepository;
-use crate::processor::{MinutesProcessor, SummaryProcessor, TodoProcessor};
+use crate::processor::{restore_punctuation, MinutesProcessor, SummaryProcessor, TodoProcessor};
 use crate::transcribe::VoskTranscriber;
 
 // ---- フロントエンド向け型定義 ----
@@ -277,6 +277,10 @@ pub fn generate_all(
     repo_state: tauri::State<'_, SharedRepository>,
 ) -> Result<GenerateResult, String> {
     info!("コマンド: generate_all, meeting_id={}", meeting_id);
+
+    // Vosk の無句読点テキストに句読点を補完してから処理する
+    let text = restore_punctuation(&text);
+    debug!("句読点補完後: {} 文字", text.len());
 
     let minute_items = MinutesProcessor::generate_minutes(&text);
     let todo_items = TodoProcessor::extract_todos(&text);

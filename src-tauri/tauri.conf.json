@@ -34,9 +34,18 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "models/vosk-model-ja/**/*": "models/vosk-model-ja",
+      "models/vosk-model-ja/README": "models/vosk-model-ja/README",
+      "models/vosk-model-ja/am/*": "models/vosk-model-ja/am",
+      "models/vosk-model-ja/conf/*": "models/vosk-model-ja/conf",
+      "models/vosk-model-ja/graph/phones/*": "models/vosk-model-ja/graph/phones",
+      "models/vosk-model-ja/graph/*": "models/vosk-model-ja/graph",
+      "models/vosk-model-ja/ivector/*": "models/vosk-model-ja/ivector",
+      "models/vosk-model-ja/rescore/*": "models/vosk-model-ja/rescore",
       "binaries/ffmpeg.exe": "binaries/ffmpeg.exe",
-      "libs/libvosk.dll": "libvosk.dll"
+      "libs/libvosk.dll": "libvosk.dll",
+      "libs/libgcc_s_seh-1.dll": "libgcc_s_seh-1.dll",
+      "libs/libstdc++-6.dll": "libstdc++-6.dll",
+      "libs/libwinpthread-1.dll": "libwinpthread-1.dll"
     }
   }
 }

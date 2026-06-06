@@ -90,6 +90,12 @@ export function App() {
     const status = result.data?.meeting.status ?? "done";
     if (status === "recording") {
       setPage({ name: "recording", meetingId });
+    } else if (status === "processing") {
+      const rawText =
+        result.data?.transcript?.edited_text ??
+        result.data?.transcript?.raw_text ??
+        "";
+      setPage({ name: "transcript", meetingId, rawText });
     } else {
       setPage({ name: "result", meetingId });
     }
